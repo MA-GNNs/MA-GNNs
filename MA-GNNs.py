@@ -14,7 +14,7 @@ import numpy as np
 epsilon = 1e-11
 
 
-class BHGAT(object):
+class MAGNN(object):
     def __init__(self, data_config, pretrain_data, args):
         # argument settings
 
@@ -28,10 +28,10 @@ class BHGAT(object):
         self.A_in_shape = self.norm_adj.tocoo().shape
 
         self.lr = args.lr
-        self.emb_dim = args.embed_size   #64
-        self.n_factors = args.n_factors  #4
-        self.n_iterations = args.n_iterations   #图中的路由迭代次数2
-        self.n_layers = args.n_layers  #高阶连通性的层数
+        self.emb_dim = args.embed_size   
+        self.n_factors = args.n_factors 
+        self.n_iterations = args.n_iterations   
+        self.n_layers = args.n_layers 
         self.pick_level = args.pick_scale
         self.cor_flag = args.cor_flag
 
@@ -44,7 +44,7 @@ class BHGAT(object):
         self.regs = eval(args.regs)
         self.decay = self.regs[0]
         self.verbose = args.verbose
-        #胶囊的参数
+        
         self.inputs_CapsLayer_size = self.n_factors
         self.outputs_CapsLayer_size=1
         self.iter_routing = args.iter_routing
@@ -72,8 +72,7 @@ class BHGAT(object):
         # initialization of model parameters
         self.weights = self._init_weights()
 
-        # create models
-        # 最重要的部分！！！！！！！！！！！！！
+        
         """
         *********************************************************
         Create Models Parameters! The most important part!
@@ -85,8 +84,7 @@ class BHGAT(object):
         self.ua_embeddings, self.ia_embeddings = self._capsule_2NE_aspect_fusion()
 
         self.ua_embeddings_t, self.ia_embeddings_t = self.ua_embeddings, self.ia_embeddings
-        # self.ua_embeddings, self.ia_embeddings = tf.split(self.all_f_embeddings, [self.n_users, self.n_items], 0)
-        # self.ua_embeddings_t, self.ia_embeddings_t = tf.split(self.all_f_embeddings, [self.n_users, self.n_items], 0)
+        
         """
         *********************************************************
         Establish the final representations for user-item pairs in batch.
@@ -98,7 +96,7 @@ class BHGAT(object):
 
         self.neg_i_g_embeddings = tf.nn.embedding_lookup(self.ia_embeddings, self.neg_items)
 
-        # pre是用来计算正则化的
+        
         self.u_g_embeddings_pre = tf.nn.embedding_lookup(self.weights['user_embedding'], self.users)
         self.pos_i_g_embeddings_pre = tf.nn.embedding_lookup(self.weights['item_embedding'], self.pos_items)
         self.neg_i_g_embeddings_pre = tf.nn.embedding_lookup(self.weights['item_embedding'], self.neg_items)
@@ -181,21 +179,18 @@ class BHGAT(object):
             layer_embeddings = []
             layer_embeddings_t = []
 
-            # split the input embedding table  切片得到胶囊
-            # .... ego_layer_embeddings is a (n_factors)-leng list of embeddings [n_users+n_items, embed_size/n_factors]
+            # split the input embedding table 
             ego_layer_embeddings = tf.split(ego_embeddings, n_factors_l, 1)
             ego_layer_embeddings_t = tf.split(ego_embeddings, n_factors_l, 1)
 
-            # perform routing mechanism   先更新嵌入再更新图
+            # perform routing mechanism
             for t in range(0, n_iterations_l):
                 iter_embeddings = []
                 iter_embeddings_t = []
                 A_iter_features = []
 
                 # split the adjacency values & get three lists of [n_users+n_items, n_users+n_items] sparse tensors
-                # .... A_factors is a (n_factors)-len list, each of which is an adjacency matrix
-                # .... D_col_factors is a (n_factors)-len list, each of which is a degree matrix w.r.t. columns
-                # .... D_row_factors is a (n_factors)-len list, each of which is a degree matrix w.r.t. rows
+                
                 if t == n_iterations_l - 1:
                     p_test = pick_
                     p_train = False
@@ -203,13 +198,11 @@ class BHGAT(object):
                 A_factors = A_factors_t = tf.split(A_features, n_factors_l, 1)
                 for i in range(0, n_factors_l):
 
-                    # 采用注意力机制更新嵌入
                     factor_embeddings = self._attentional_propagation_one_intent(ego_layer_embeddings[i], A_factors[i],
                                                                                  k)
                     factor_embeddings_t = self._attentional_propagation_one_intent(ego_layer_embeddings_t[i],
                                                                                    A_factors_t[i], k)
 
-                    # 以上是 拉普拉斯矩阵*E（嵌入矩阵）  得到更新后的矩阵表示
                     iter_embeddings.append(factor_embeddings)
                     iter_embeddings_t.append(factor_embeddings_t)
 
@@ -217,10 +210,6 @@ class BHGAT(object):
                         layer_embeddings = iter_embeddings
                         layer_embeddings_t = iter_embeddings_t
 
-                    # 这一部分是更新图
-                    # get the factor-wise embeddings
-                    # .... head_factor_embeddings is a dense tensor with the size of [all_h_list, embed_size/n_factors]
-                    # .... analogous to tail_factor_embeddings
 
                     head_factor_embedings = tf.nn.embedding_lookup(factor_embeddings, self.all_h_list)  # 行
                     tail_factor_embedings = tf.nn.embedding_lookup(ego_layer_embeddings[i], self.all_t_list)  # 列
@@ -274,16 +263,7 @@ class BHGAT(object):
             self.pos_i_g_embeddings_pre) + tf.nn.l2_loss(self.neg_i_g_embeddings_pre)
         regularizer = regularizer / self.batch_size
 
-        # In the first version, we implement the bpr loss via the following codes:
-        # We report the performance in our paper using this implementation.
-        #         maxi = tf.log(tf.nn.sigmoid(pos_scores - neg_scores))
-        #         mf_loss = tf.negative(tf.reduce_mean(maxi))
-
-        ## In the second version, we implement the bpr loss via the following codes to avoid 'NAN' loss during training:
-        ## However, it will change the training performance and training performance.
-        ## Please retrain the model and do a grid search for the best experimental setting.
-
-        mf_loss = tf.reduce_mean(tf.nn.softplus(-(pos_scores - neg_scores)))  # 即实现sigmoid函数
+        mf_loss = tf.reduce_mean(tf.nn.softplus(-(pos_scores - neg_scores)))  
 
         emb_loss = self.decay * regularizer
 
@@ -296,9 +276,9 @@ class BHGAT(object):
             return cor_loss
 
         ui_embeddings = tf.concat([cor_u_embeddings, cor_i_embeddings], axis=0)
-        ui_factor_embeddings = tf.split(ui_embeddings, self.n_factors, 1)  # 维度为1 切四份
+        ui_factor_embeddings = tf.split(ui_embeddings, self.n_factors, 1) 
 
-        for i in range(0, self.n_factors - 1):  # 分四个胶囊进行计算
+        for i in range(0, self.n_factors - 1):  
             x = ui_factor_embeddings[i]
             y = ui_factor_embeddings[i + 1]
             cor_loss += self._create_distance_correlation(x, y)
@@ -355,10 +335,10 @@ class BHGAT(object):
     def _convert_A_values_to_A_factors_with_P(self, f_num, A_factor_values, pick=True):
 
         A_factors = []
-        D_col_factors = []  # 列
-        D_row_factors = []  # 行
+        D_col_factors = [] 
+        D_row_factors = [] 
         # get the indices of adjacency matrix.
-        A_indices = np.mat([self.all_h_list, self.all_t_list]).transpose()  # 得到邻接矩阵的下标
+        A_indices = np.mat([self.all_h_list, self.all_t_list]).transpose() 
         D_indices = np.mat(
             [list(range(self.n_users + self.n_items)), list(range(self.n_users + self.n_items))]).transpose()
 
@@ -402,7 +382,6 @@ class BHGAT(object):
 
     def _attentional_propagation_one_intent(self, ego_embedding_one_intent, A_factors_one_intent, k_num):
         N = len(self.all_h_list)
-        # 下面是邻接矩阵的压缩存储得到的  行和列
         head_factor_embedings = tf.nn.embedding_lookup(ego_embedding_one_intent, self.all_h_list)  # 行
         tail_factor_embedings = tf.nn.embedding_lookup(ego_embedding_one_intent, self.all_t_list)  # 列
 
@@ -417,27 +396,6 @@ class BHGAT(object):
         factor_embedding_one_intent = tf.sparse.sparse_dense_matmul(att_weight, ego_embedding_one_intent)
 
         norm_factor_embedding = tf.nn.l2_normalize(factor_embedding_one_intent, axis=1)
-
-        """
-        att_input_1 = tf.reshape(
-            tf.concat([head_factor_embedings, tail_factor_embedings, A_factors_one_intent], axis=1), [N, -1])
-        att_input_2 = tf.reshape(tf.concat([head_factor_embedings, tail_factor_embedings], axis=1), [N, -1])
-
-        attention_1 = tf.squeeze(tf.nn.leaky_relu(tf.matmul(att_input_1, self.weights['W_a_%d' % k_num])), [1])
-        attention_2 = tf.squeeze(tf.nn.leaky_relu(tf.matmul(att_input_2, self.weights['W_b_%d' % k_num])), [1])
-
-        A_indices = np.mat([self.all_h_list, self.all_t_list]).transpose()
-
-        att_tensor_1 = tf.SparseTensor(A_indices, attention_1, self.A_in_shape)
-        att_weight_1 = tf.sparse_softmax(att_tensor_1)
-        factor_embedding_one_intent_1 = tf.sparse.sparse_dense_matmul(att_weight_1, ego_embedding_one_intent)
-
-        att_tensor_2 = tf.SparseTensor(A_indices, attention_2, self.A_in_shape)
-        att_weight_2 = tf.sparse_softmax(att_tensor_2)
-        factor_embedding_one_intent_2 = tf.sparse.sparse_dense_matmul(att_weight_2, A_factors_one_intent)
-
-        norm_factor_embedding = tf.nn.l2_normalize(factor_embedding_one_intent_1, axis=1)+tf.nn.l2_normalize(factor_embedding_one_intent_2, axis=1)
-        """
 
         return norm_factor_embedding
 
